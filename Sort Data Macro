@@ -1,0 +1,9 @@
+function sortDataByQuantity() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Main"); // Specify the sheet name
+
+  var range = sheet.getRange('A10:AB13'); // Define the range to sort
+  var columnToSort = 20; // Column T (20th column) for sorting
+
+  // Perform sorting from largest to smallest
+  range.sort({ column: columnToSort, ascending: false });
+}
