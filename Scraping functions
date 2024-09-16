@@ -1,0 +1,376 @@
+function onEdit(e) {
+  var sheet = e.source.getActiveSheet();
+
+  if (sheet.getName() !== "Main - New" && sheet.getName() !== "Watch List" && sheet.getName() !== "Rebalances") {
+    return; // Exit the function if the sheet is not "Main"
+  }
+
+  var range = e.range;
+
+  // Check if the edit was made in column A and not in the header row
+  if (range.getColumn() === 1 && range.getRow() > 1) {
+    var row = range.getRow();
+
+    var formulas = {
+      B: '=GOOGLEFINANCE(A' + row + ',"name")',
+      C: '', // Assuming C is manually input, so no formula here
+      D: '=GOOGLEFINANCE(A' + row + ',"price")',
+      E: '=D' + row + '*C' + row,
+      F: '', // Assuming F is manually input, so no formula here
+      G: '=E' + row + '-F' + row,
+      H: '=IFERROR(G' + row + '/F' + row + ',"0.00%")',
+      I: '=E' + row + '/\'Main - New\'!$E$6',
+      J: '=IMPORTYAHOO(A' + row + ')',
+      K: '=IFERROR(GOOGLEFINANCE(A' + row + ', "pe"), "N/A")',
+      L: '=IMPORTPE(A' + row + ')',
+      M: '=IMPORTZACKS(A' + row + ')',
+      N: '=IFERROR(GOOGLEFINANCE(A' + row + ', "eps"), "N/A")',
+      O: '=EPS3_5(A' + row + ')',
+      P: '=IMPORTYAHOOP_B(A' + row + ')',
+      Q: '=IF(T' + row + ' = "", "", IF(T' + row + ' >= 1000000000000, CONCATENATE(ROUND(T' + row + ' / 1000000000000, 2), "T"), IF(T' + row + ' >= 1000000000, CONCATENATE(ROUND(T' + row + ' / 1000000000, 2), "B"), CONCATENATE(ROUND(T' + row + ' / 1000000, 2), "M"))))',
+      S: '=fcf(A' + row + ')',
+      T: '=IFERROR(GOOGLEFINANCE(A' + row + ', "marketcap"), "")',
+      U: '=IFERROR(LEFT(S' + row + ', LEN(S' + row + ') - 1),"")',
+      V: '=IF(RIGHT(S' + row + ', 1) = "B", U' + row + ' * 1000000000, IF(RIGHT(S' + row + ', 1) = "M", U' + row + ' * 1000000,""))',
+      W: '=IFERROR(T' + row +'/V' + row +',"")',
+      R: '=IF(W' + row + '="", "", IFERROR(ROUND(W' + row + ',0), ""))',
+      X: '=EV_R(A' + row + ')',
+      Y: '=EV_EBITDA(A' + row + ')',
+      Z: '=getDivData(A' + row + ')'
+    };
+
+    // Apply the formulas
+    for (var col in formulas) {
+      if (formulas[col] !== '') {
+        sheet.getRange(col + row).setFormula(formulas[col]);
+      }
+    }
+  }
+}
+
+
+function sortData() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Main"); // Get the specific sheet by name
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Sheet "Main" not found.');
+    return;
+  }
+
+  var dropdownValue = sheet.getRange('P8').getValue(); // Read the dropdown value from P8
+
+  // Define the range to sort, including all relevant columns
+  var range = sheet.getRange('A10:AB13'); // Adjust this range as necessary
+
+  // Determine sorting order based on the dropdown value
+  if (dropdownValue === 'Sort Ascending') {
+    range.sort({ column: 20, ascending: true }); // Sort based on column T (20th column)
+  } else if (dropdownValue === 'Sort Descending') {
+    range.sort({ column: 20, ascending: false }); // Sort based on column T (20th column)
+  } else {
+    SpreadsheetApp.getUi().alert('Please select "Sort Ascending" or "Sort Descending" from the dropdown in P8.');
+  }
+}
+
+
+function getDivData(stockSymbol) {
+  var url = "https://www.zacks.com/stock/quote/" + stockSymbol;
+  var response = UrlFetchApp.fetch(url);
+  var html = response.getContentText();
+
+  // Extract the content based on the specific XPath
+  var dlRegex = /<dl[^>]*>([\s\S]*?)<\/dl>/g;
+  var dlMatches = [];
+  var match;
+
+  while (match = dlRegex.exec(html)) {
+    dlMatches.push(match[0]);
+  }
+
+  // Ensure we're selecting the 8th <dl> element
+  if (dlMatches.length >= 8) {
+    var targetDl = dlMatches[7];  // Index 7 corresponds to the 8th element
+
+    // Extract the content within the <span> tag inside the target <dl>
+    var spanRegex = /<span[^>]*>(.*?)<\/span>/;
+    var spanMatch = spanRegex.exec(targetDl);
+
+    if (spanMatch) {
+      // Clean the extracted data
+      var cleanData = spanMatch[1].trim();
+      return cleanData;
+    } else {
+      return "Data not found";
+    }
+  } else {
+    return "N/A";
+  }
+}
+
+function EPS3_5(stockSymbol) {
+  var url = "https://www.zacks.com/stock/quote/" + stockSymbol;
+  var response = UrlFetchApp.fetch(url);
+  var html = response.getContentText();
+
+  // Extract the content based on the specific XPath
+  // This regular expression matches the <p> tag within the specified XPath
+  var pTagRegex = /<p class="up float_right">([\s\S]*?)<\/p>/;
+
+  var match = pTagRegex.exec(html);
+
+  if (match) {
+    // Clean the extracted data
+    var cleanData = match[1].trim();
+    return cleanData;
+  } else {
+    return "N/A";
+  }
+}
+
+
+function IMPORTZACKS(quote) {
+  const url = "https://www.zacks.com/stock/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Define the XPath as a regex to match the data
+    const regex = /<dd>([^<]+)<\/dd>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Check if matches are found and extract the desired value
+    if (matches && matches[10]) { // Index 8 represents the 9th <dd> tag
+      return matches[10][1];
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+
+function IMPORTPE(quote) {
+  const url = "https://www.zacks.com/stock/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Define the XPath as a regex to match the data
+    const regex = /<dd>([^<]+)<\/dd>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Check if matches are found and extract the desired value
+    if (matches && matches[10]) { // Index 8 represents the 9th <dd> tag
+      return matches[9][1];
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+
+
+function getDivsData(stockSymbol) {
+  var url = "https://www.zacks.com/stock/quote/" + stockSymbol;
+  var response = UrlFetchApp.fetch(url);
+  var html = response.getContentText();
+
+  // Extract the content based on the specific XPath
+  var dlRegex = /<dl[^>]*>([\s\S]*?)<\/dl>/g;
+  var dlMatches = [];
+  var match;
+
+  while (match = dlRegex.exec(html)) {
+    dlMatches.push(match[0]);
+  }
+
+  // Ensure we're selecting the 8th <dl> element
+  if (dlMatches.length >= 8) {
+    var targetDl = dlMatches[7]; // Index 7 corresponds to the 8th element
+
+    // Extract the content within the <span> tag inside the target <dl>
+    var spanRegex = /<span[^>]*>(.*?)<\/span>/;
+    var spanMatch = spanRegex.exec(targetDl);
+
+    if (spanMatch) {
+      // Clean the extracted data
+      var cleanData = spanMatch[1].trim();
+      return cleanData;
+    } else {
+      // If no data found in the <span>, search for alternative XPath
+      var tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/g;
+      var tableMatches = [];
+      
+      while (match = tableRegex.exec(html)) {
+        tableMatches.push(match[0]);
+      }
+
+      // Check if there are tables in the extracted HTML content
+      if (tableMatches.length >= 1) {
+        var targetTable = tableMatches[0]; // Assuming it's the first table
+
+        // Extract content within the <td> tag at the specific XPath
+        var tdRegex = /<tr[^>]*>[\s\S]*?<tr[^>]*>[\s\S]*?<td[^>]*>[\s\S]*?<td[^>]*>(.*?)<\/td>/;
+        var tdMatch = tdRegex.exec(targetTable);
+
+        if (tdMatch) {
+          var alternativeData = tdMatch[1].trim();
+          return alternativeData;
+        } else {
+          return "Alternative data not found";
+        }
+      } else {
+        return "No table found for alternative data extraction";
+      }
+    }
+  } else {
+    return "No data found in primary search";
+  }
+}
+
+function IMPORTYAHOO(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use regex to match the value at the specific XPath
+    // This XPath corresponds to an HTML element which could be parsed with regex to locate the data
+    const regex = /<li[^>]*>\s*<p[^>]*>[^<]*<\/p>\s*<p[^>]*>([^<]+)<\/p>\s*<\/li>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Assuming the target value is in the 6th <li> element's second <p> tag
+    if (matches && matches[5]) { // Index 5 represents the 6th <li> element
+      return matches[5][1].trim(); // Return the matched value
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+
+function IMPORTYAHOOP_B(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use regex to match the value at the specific XPath
+    // This XPath corresponds to an HTML element which could be parsed with regex to locate the data
+    const regex = /<li[^>]*>\s*<p[^>]*>[^<]*<\/p>\s*<p[^>]*>([^<]+)<\/p>\s*<\/li>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Assuming the target value is in the 6th <li> element's second <p> tag
+    if (matches && matches[6]) { // Index 5 represents the 6th <li> element
+      return matches[6][1].trim(); // Return the matched value
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+
+function EV_R(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use regex to match the value at the specific XPath
+    // This XPath corresponds to an HTML element which could be parsed with regex to locate the data
+    const regex = /<li[^>]*>\s*<p[^>]*>[^<]*<\/p>\s*<p[^>]*>([^<]+)<\/p>\s*<\/li>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Assuming the target value is in the 6th <li> element's second <p> tag
+    if (matches && matches[7]) { // Index 5 represents the 6th <li> element
+      return matches[7][1].trim(); // Return the matched value
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+function EV_EBITDA(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use regex to match the value at the specific XPath
+    // This XPath corresponds to an HTML element which could be parsed with regex to locate the data
+    const regex = /<li[^>]*>\s*<p[^>]*>[^<]*<\/p>\s*<p[^>]*>([^<]+)<\/p>\s*<\/li>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Assuming the target value is in the 6th <li> element's second <p> tag
+    if (matches && matches[8]) { // Index 5 represents the 6th <li> element
+      return matches[8][1].trim(); // Return the matched value
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+function fcf(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote;
+
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use regex to match the value at the specific XPath
+    // The XPath corresponds to the 3rd <li> element under a specific section, and the value is within the second <p> tag
+    const regex = /<li[^>]*>\s*<p[^>]*>[^<]*<\/p>\s*<p[^>]*>([^<]+)<\/p>\s*<\/li>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Assuming the target value is in the 3rd <li> element's second <p> tag in section[7]
+    if (matches && matches[17]) { // Index 2 represents the 3rd <li> element
+      return matches[17][1].trim(); // Return the matched value
+    } else {
+      return "N/A";
+    }
+  } catch (error) {
+    return "Error fetching data";
+  }
+}
+
+function fcf2(quote) {
+  const url = "https://finance.yahoo.com/quote/" + quote + "/cash-flow/";
+
+  try {
+    // Fetch the HTML content from the given URL
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const html = response.getContentText();
+
+    // Use a regex pattern to match the specific data within the section of interest
+    // Adjust the regex pattern as needed to fit the exact format of the data
+    const regex = /<div[^>]*>\s*<div[^>]*>\s*<div[^>]*>\s*<div[^>]*>\s*([^<]+)<\/div>/g;
+    const matches = [...html.matchAll(regex)];
+
+    // Extract the value from the matched results
+    // You may need to adjust the index based on the structure of the matched HTML
+    if (matches && matches[0]) { // Assuming the desired data is the first match
+      return matches[0][1].trim(); // Return the matched value
+    } else {
+      return "N/A"; // Return N/A if the value is not found
+    }
+  } catch (error) {
+    // Handle errors, such as network issues or incorrect URL format
+    return "Error fetching data";
+  }
+}
